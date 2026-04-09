@@ -10,8 +10,9 @@ import streamlit as st
 from dotenv import load_dotenv
 from openai import APIConnectionError, OpenAI
 
-from llm import generate_response
-from menu_db import (
+from llm import extract_place_count, extract_search_keyword, generate_response, generate_response_with_places
+from kakao_map import build_map_html, search_places
+from db.menu_db import (
     DEFAULT_MENU_CSV,
     KOREAN_WEEKDAYS,
     build_menu_context_for_day,
@@ -19,7 +20,7 @@ from menu_db import (
     filter_open_rows,
     load_menu_rows,
 )
-from tts import synthesize_speech
+from llm.tts import synthesize_speech
 
 
 def inject_styles() -> None:
@@ -79,8 +80,9 @@ def inject_styles() -> None:
             box-shadow: 0 12px 30px rgba(17, 24, 39, 0.05);
             margin-bottom: 0.85rem;
             display: flex;
-            gap: 0.9rem;
-            align-items: center;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 160px;
         }
         .restaurant-thumb {
             width: 76px;
@@ -192,35 +194,20 @@ def hero_svg() -> str:
     return base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
 
-def food_thumb(label: str) -> str:
-    safe_label = (label[:1] or "?").upper()
-    svg = f"""
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#fff1cc"/>
-          <stop offset="100%" stop-color="#ffcb77"/>
-        </linearGradient>
-      </defs>
-      <rect width="120" height="120" rx="24" fill="url(#g)"/>
-      <circle cx="60" cy="60" r="31" fill="#fff8ef" stroke="#d97706" stroke-width="4"/>
-      <circle cx="60" cy="60" r="18" fill="#fbbf24"/>
-      <text x="60" y="68" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#7c2d12">{safe_label}</text>
-    </svg>
-    """
-    return f"data:image/svg+xml;base64,{base64.b64encode(svg.encode('utf-8')).decode('ascii')}"
-
-
 def init_state() -> None:
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("latest_audio_bytes", None)
     st.session_state.setdefault("tts_enabled", True)
     st.session_state.setdefault("quick_question", None)
+    st.session_state.setdefault("kakao_places", [])
+    st.session_state.setdefault("kakao_map_html", "")
 
 
 def reset_conversation() -> None:
     st.session_state["messages"] = []
     st.session_state["latest_audio_bytes"] = None
+    st.session_state["kakao_places"] = []
+    st.session_state["kakao_map_html"] = ""
 
 
 def sidebar_controls(csv_path: Path) -> str:
@@ -266,7 +253,7 @@ def render_chat_section() -> None:
     title_col, button_col = st.columns([0.84, 0.16])
     with title_col:
         st.markdown('<div class="section-title">대화</div>', unsafe_allow_html=True)
-        st.caption("추천은 데이터에 있는 가게만 사용합니다.")
+        st.caption("카카오맵에서 실시간으로 검색한 가게를 추천합니다.")
     with button_col:
         st.write("")
         if st.button("대화 리셋", use_container_width=True):
@@ -276,7 +263,8 @@ def render_chat_section() -> None:
     if st.session_state["latest_audio_bytes"]:
         st.audio(st.session_state["latest_audio_bytes"], format="audio/mp3", autoplay=True)
 
-    for message in st.session_state.messages:
+    # 최신 메시지가 위에 오도록 역순으로 표시
+    for message in reversed(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     st.markdown("</div>", unsafe_allow_html=True)
@@ -316,26 +304,6 @@ def render_dashboard(csv_path: Path, weekday: str) -> str:
     )
 
     open_context = build_menu_context_for_day(csv_path, weekday)
-
-    st.markdown('<div class="section-title">가게 카드</div>', unsafe_allow_html=True)
-    cols = st.columns(2)
-    for index, row in enumerate(open_rows):
-        with cols[index % 2]:
-            st.markdown(
-                f"""
-                <div class="restaurant-card">
-                    <img class="restaurant-thumb" src="{food_thumb(row.name)}" />
-                    <div>
-                      <div class="restaurant-name">{row.name}</div>
-                      <div class="restaurant-meta">
-                        주소: {row.address}<br/>
-                        휴무: {row.closed_day or '없음'}
-                      </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
 
     return open_context
 
@@ -382,7 +350,7 @@ def page_main() -> None:
               <div class="hero-kicker">LUNCH_RECOMMEND_AGENT</div>
               <div class="hero-title">점심 메뉴 추천기</div>
               <div class="hero-copy">
-                먼저 물어보고 빠르게 고르세요.<br/>DB에 있는 가게만 기준으로 오늘 점심을 추천합니다.
+                먼저 물어보고 빠르게 고르세요.<br/>카카오맵 실시간 검색으로 딱 맞는 점심을 찾아드립니다.
               </div>
             </div>
             """,
@@ -401,6 +369,34 @@ def page_main() -> None:
     csv_path = Path(DEFAULT_MENU_CSV)
     selected_weekday = sidebar_controls(csv_path)
     open_context = build_menu_context_for_day(csv_path, selected_weekday)
+
+    # 지도 + 추천 맛집 카드 (채팅 위에 고정)
+    if st.session_state.get("kakao_map_html"):
+        st.markdown('<div class="section-title" style="margin-top:1.5rem; margin-bottom:0.6rem;">📍 지도에서 보기</div>', unsafe_allow_html=True)
+        st.components.v1.html(st.session_state["kakao_map_html"], height=395, scrolling=False)
+
+        places = st.session_state["kakao_places"]
+        if places:
+            st.markdown('<div class="section-title" style="margin-top:1rem">🍴 추천 맛집</div>', unsafe_allow_html=True)
+            place_cols = st.columns(len(places))
+            for col, p in zip(place_cols, places):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class="restaurant-card">
+                          <div>
+                            <div class="restaurant-name">&#128205; {p['name']}</div>
+                            <div class="restaurant-meta">
+                              {p['address']}<br/>
+                              {'&#128222; ' + p['phone'] if p.get('phone') else '&nbsp;'}
+                            </div>
+                          </div>
+                          <div>{'<a href="' + p['url'] + '" target="_blank" style="font-size:0.82rem;color:#b45309;">카카오맵에서 보기 ↗</a>' if p.get('url') else ''}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        st.divider()
 
     render_chat_section()
     user_text = st.chat_input("점심 메뉴를 물어보세요")
@@ -421,14 +417,25 @@ def page_main() -> None:
         else:
             client = OpenAI(api_key=api_key)
             with st.chat_message("assistant"):
-                with st.spinner("추천을 만드는 중입니다..."):
+                with st.spinner("카카오맵에서 맛집을 찾는 중..."):
                     try:
-                        answer = generate_response(
-                            client=client,
-                            user_text=user_text,
-                            menu_context="",
-                            open_only_context=open_context,
-                        )
+                        # 1. LLM이 검색 키워드 판단
+                        keyword = extract_search_keyword(client, user_text)
+                        # 2. 사용자 요청 개수 파싱
+                        size = extract_place_count(user_text, default=3)
+                        # 3. 카카오 맵 검색
+                        places = search_places(keyword, size=size)
+                        st.session_state["kakao_places"] = places
+                        st.session_state["kakao_map_html"] = build_map_html(places)
+                        # 3. 검색 결과 기반 LLM 응답
+                        if places:
+                            answer = generate_response_with_places(client, user_text, places)
+                        else:
+                            answer = generate_response(
+                                client=client,
+                                user_text=user_text,
+                                open_only_context=open_context,
+                            )
                     except APIConnectionError:
                         st.error("OpenAI 연결에 실패했습니다. 네트워크나 방화벽을 확인해 주세요.")
                     else:
@@ -443,11 +450,6 @@ def page_main() -> None:
                                 st.audio(audio_bytes, format="audio/mp3", autoplay=True)
                         else:
                             st.session_state["latest_audio_bytes"] = None
-
-    st.divider()
-    render_dashboard(csv_path, selected_weekday)
-    st.markdown("---")
-    render_summary_panel()
 
 
 def main() -> None:
