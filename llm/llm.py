@@ -32,6 +32,67 @@ Answer in Korean.
 """.strip()
 
 
+def extract_search_keyword(
+    client: OpenAI,
+    user_text: str,
+    model: str = "gpt-5.4-mini",
+    base_location: str = "울산 북구 송정",
+) -> str:
+    """사용자 질문에서 카카오맵 검색용 키워드를 추출합니다."""
+    prompt = (
+        f"다음 사용자 질문을 보고, 카카오맵에서 음식점 검색에 쓸 짧은 한국어 키워드를 만들어줘.\n"
+        f"규칙:\n"
+        f"- 사용자 질문에 특정 장소나 지역이 언급되면 반드시 그 장소/지역을 키워드에 포함해.\n"
+        f"- 사용자가 지역을 따로 언급하지 않았을 때만 기본 지역 '{base_location}'을 사용해.\n"
+        f"- 음식 종류, 분위기 등 검색에 유용한 조건도 키워드에 포함해.\n"
+        f"- 키워드만 출력해, 설명이나 부가 문장 없이.\n\n"
+        f"질문: {user_text}"
+    )
+    resp = client.responses.create(model=model, input=prompt)
+    return resp.output_text.strip()
+
+
+def extract_place_count(user_text: str, default: int = 3) -> int:
+    """사용자 질문에서 요청 개수를 파싱합니다."""
+    import re
+    # 한국어 숫자 매핑
+    korean_nums = {"하나": 1, "한": 1, "두": 2, "세": 3, "넷": 4, "다섯": 5,
+                  "여섯": 6, "일곡": 7, "여덟": 8, "아홉": 9, "열": 10}
+    for word, num in korean_nums.items():
+        if re.search(rf"{word}\s*(개|곳)", user_text):
+            return min(num, 15)
+    # 아라비아 숫자
+    match = re.search(r"(\d+)\s*(개|곳)", user_text)
+    if match:
+        return min(int(match.group(1)), 15)
+    return default
+
+
+def generate_response_with_places(
+    client: OpenAI,
+    user_text: str,
+    places: list[dict],
+    model: str = "gpt-5.4-mini",
+) -> str:
+    """카카오맵 검색 결과를 바탕으로 추천 답변을 생성합니다."""
+    places_text = "\n".join(
+        [
+            f"{i + 1}. {p['name']} | 주소: {p['address']}"
+            + (f" | 전화: {p['phone']}" if p.get("phone") else "")
+            + (f" | 카테고리: {p['category']}" if p.get("category") else "")
+            for i, p in enumerate(places)
+        ]
+    )
+    prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"카카오맵 검색 결과 (반드시 이 가게들 중에서만 추천하세요):\n"
+        f"{places_text}\n\n"
+        f"사용자 질문: {user_text}"
+    )
+    resp = client.responses.create(model=model, input=prompt)
+    return resp.output_text.strip()
+
+
 def generate_response(
     client: OpenAI,
     user_text: str,

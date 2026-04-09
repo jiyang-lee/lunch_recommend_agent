@@ -2,84 +2,74 @@
 
 ## 프로젝트 소개
 
-음성 입력(STT) -> LLM 응답 생성 -> 음성 출력(TTS) 흐름으로 동작하는 점심 메뉴 추천 에이전트입니다.  
-CLI 실행과 Streamlit 대시보드 실행을 모두 지원합니다.
+이 저장소는 음성 입력(STT)을 받아 LLM으로 점심 메뉴 추천을 생성하고, 결과를 음성(TTS)으로 재생하는 에이전트입니다. CLI 실행과 Streamlit 기반 대시보드를 지원합니다.
 
-## 폴더 구조
+## 중요 변경 — 데이터 소스
 
-- `db/`: 가게 CSV/DB 데이터와 DB 관련 코드
+이 프로젝트는 이제 로컬 CSV/DB 대신 **Kakao Local API (지도 검색)** 를 기본 데이터 소스로 사용합니다. 즉, 저장된 CSV가 있더라도 추천은 실시간으로 Kakao 지도 검색 결과만 참고하도록 설계되어 있습니다. Kakao API 키(`KAKAO_REST_API_KEY`)를 `.env`에 설정해야 합니다.
+
+## 폴더 구조 (요약)
+
 - `llm/`: LLM, STT, TTS, CLI 실행 코드
-- `streamlit_ui/`: Streamlit 화면 코드
-- `llm_main.py`: CLI 실행용 진입 파일
-- `streamlit_app.py`: Streamlit 실행용 진입 파일
+- `streamlit_ui/`: Streamlit 화면 코드 (대시보드)
+- `kakao_api.py`, `location_rag.py`: Kakao 지도/위치 관련 헬퍼
+- `llm_main.py`: CLI 실행 진입점
+- `streamlit_app.py`: Streamlit 실행 진입점 (프로젝트 루트 호환 wrapper)
 
 ## 개발 환경 설정
 
-`uv`로 가상환경을 만들고 필요한 라이브러리를 설치합니다.
+Python 3.11 이상에서 동작하며, 의존성은 `pyproject.toml`의 `dependencies`를 참고하세요. 간단 설치 예:
 
 ```bash
-uv venv
-uv add openai python-dotenv gTTS sounddevice scipy streamlit
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt  # 또는 pyproject.toml 기반 설치
 ```
 
-## API 키 설정
+필요한 주요 패키지: `openai`, `python-dotenv`, `streamlit`, `gtts`, `sounddevice`, `scipy`, `requests`.
 
-프로젝트 루트에 `.env` 파일을 두고 아래처럼 작성하면 됩니다.
+## 환경 변수 설정
+
+프로젝트 루트에 `.env` 파일을 만들고 다음 항목을 설정하세요:
 
 ```env
-OPENAI_API_KEY=your_key_here
+OPENAI_API_KEY=your_openai_key
+KAKAO_REST_API_KEY=your_kakao_rest_api_key
 ```
 
-또는 환경 변수로 직접 설정해도 됩니다.
+Windows PowerShell에서 환경 변수 설정 예:
 
-```bash
-set OPENAI_API_KEY=your_key_here
+```powershell
+setx OPENAI_API_KEY "your_openai_key"
+setx KAKAO_REST_API_KEY "your_kakao_rest_api_key"
 ```
 
 ## 실행 방법
 
-### 1. 마이크 입력으로 실행
+### 1) CLI (텍스트 입력)
 
 ```bash
-uv run python llm_main.py
+python llm_main.py --text "송정테라스 근처 점심 추천해줘" --origin-query "울산 송정동" --radius-m 500
 ```
 
-### 2. 텍스트로 바로 실행
+### 2) Streamlit 대시보드
 
 ```bash
-uv run python llm_main.py --text "점심 메뉴 추천해줘"
+streamlit run streamlit_app.py
 ```
 
-### 3. Streamlit 대시보드 실행
+대시보드에서 기준 위치와 반경을 입력하면 우측에 Kakao 기반 후보들이 지도와 카드로 표시됩니다.
 
-```bash
-uv run streamlit run streamlit_app.py
-```
+## 동작 원칙
 
-## 주요 기능
+- 추천은 반드시 Kakao API로부터 받아온 후보 데이터를 기반으로 생성됩니다. (LLM이 임의로 가게명을 생성하지 않도록 제한)
+- 현재 위치 기반 추천을 사용하려면 위도/경도를 제공하거나 브라우저에서 위치 권한을 허용해야 합니다.
 
-- STT -> LLM -> TTS 전체 흐름 지원
-- 점심 메뉴 추천 결과를 TTS로 자동 재생
-- TTS on/off 토글 지원
-- 대화 리셋 버튼 지원
-- CSV에 있는 가게만 추천하도록 제한
-- Streamlit 채팅 UI + 메뉴 대시보드 지원
+## 문제 발생 시
 
-## CSV 데이터 위치
+- Kakao API 에러(401/403 등)가 발생하면 `.env` 설정과 Kakao Developers 설정(지도 API 활성화)을 확인하세요.
+- Streamlit에서 지도가 표시되지 않으면 `pandas` 설치 여부를 확인해 주세요 (`pip install pandas`).
 
-기본 CSV 파일 경로는 아래입니다.
+---
 
-```text
-db/restaurants.csv
-```
 
-다른 CSV 파일을 쓰고 싶으면 CLI 실행 시 `--menu-csv` 옵션으로 경로를 넘기면 됩니다.
-
-```bash
-uv run python llm_main.py --menu-csv your_file.csv
-```
-
-## 참고
-
-- TTS는 `gTTS`를 사용하므로 인터넷 연결이 필요합니다.
-- TTS 재생용 텍스트에서는 `[ ]`, `*`, `/` 같은 문자를 제거합니다.

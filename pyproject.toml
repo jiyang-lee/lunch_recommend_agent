@@ -11,4 +11,5 @@ dependencies = [
   "streamlit",
   "sounddevice",
   "scipy",
+  "requests",
 ]
