@@ -6,7 +6,6 @@ import base64
 import os
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from openai import APIConnectionError, OpenAI
@@ -102,6 +101,42 @@ def inject_styles() -> None:
             color: #6b7280;
             line-height: 1.5;
         }
+        .stat-grid {
+            display: flex;
+            gap: 1rem;
+            margin: 0.75rem 0 1.25rem 0;
+        }
+        .stat-card {
+            flex: 1;
+            border-radius: 20px;
+            padding: 1.1rem 1.3rem;
+            background: linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,248,236,0.97));
+            border: 1px solid rgba(122, 92, 61, 0.14);
+            box-shadow: 0 10px 28px rgba(80, 53, 20, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .stat-card-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.07em;
+            color: #b45309;
+            text-transform: uppercase;
+        }
+        .stat-card-value {
+            font-size: 2.4rem;
+            font-weight: 900;
+            color: #111827;
+            line-height: 1;
+        }
+        .stat-card-sub {
+            font-size: 0.82rem;
+            color: #6b7280;
+            margin-top: 0.15rem;
+        }
+        .stat-card.open .stat-card-value { color: #16a34a; }
+        .stat-card.closed .stat-card-value { color: #dc2626; }
         .summary-panel {
             border-radius: 20px;
             padding: 1rem 1.1rem;
@@ -180,6 +215,7 @@ def init_state() -> None:
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("latest_audio_bytes", None)
     st.session_state.setdefault("tts_enabled", True)
+    st.session_state.setdefault("quick_question", None)
 
 
 def reset_conversation() -> None:
@@ -189,7 +225,6 @@ def reset_conversation() -> None:
 
 def sidebar_controls(csv_path: Path) -> str:
     st.sidebar.title("메뉴 보드")
-    st.sidebar.caption("CSV 가게 목록")
     st.session_state["tts_enabled"] = st.sidebar.toggle(
         "TTS 재생",
         value=st.session_state["tts_enabled"],
@@ -198,32 +233,31 @@ def sidebar_controls(csv_path: Path) -> str:
 
     weekday_options = ["오늘", *KOREAN_WEEKDAYS]
     selected_weekday = st.sidebar.selectbox("요일", weekday_options, index=0)
-    search = st.sidebar.text_input("가게 검색", "")
 
-    rows = load_menu_rows(csv_path)
-    if not rows:
-        st.sidebar.warning(f"CSV 파일을 찾지 못했습니다: {csv_path}")
-        return selected_weekday
+    st.sidebar.divider()
+    st.sidebar.markdown(
+        """
+        <div style="font-size:0.78rem; font-weight:700; letter-spacing:0.07em;
+                    color:#b45309; text-transform:uppercase; margin-bottom:0.5rem;">
+          ⚡ 빠른 질문
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    quick_questions = [
+        "오늘 점심 추천해줘",
+        "국물 있는 거 추천해줘",
+        "빨리 먹을 수 있는 곳 알려줘",
+        "혼밥하기 좋은 곳 있어?",
+        "어제랑 안 겹치게 추천해줘",
+    ]
+    for q in quick_questions:
+        if st.sidebar.button(q, use_container_width=True, key=f"qq_{q}"):
+            st.session_state["quick_question"] = q
 
     effective_weekday = (
         current_korean_weekday() if selected_weekday == "오늘" else selected_weekday
     )
-    open_rows = filter_open_rows(rows, effective_weekday)
-    filtered_rows = [
-        row
-        for row in open_rows
-        if search.lower() in row.name.lower() or search.lower() in row.address.lower()
-    ]
-
-    st.sidebar.metric("전체", len(rows))
-    st.sidebar.metric("영업중", len(open_rows))
-    st.sidebar.metric("검색결과", len(filtered_rows))
-    st.sidebar.divider()
-
-    for row in filtered_rows[:10]:
-        st.sidebar.write(f"**{row.name}**")
-        st.sidebar.caption(f"{row.address} / 휴무: {row.closed_day or '없음'}")
-
     return effective_weekday
 
 
@@ -232,7 +266,7 @@ def render_chat_section() -> None:
     title_col, button_col = st.columns([0.84, 0.16])
     with title_col:
         st.markdown('<div class="section-title">대화</div>', unsafe_allow_html=True)
-        st.caption("추천은 CSV에 있는 가게만 사용합니다.")
+        st.caption("추천은 데이터에 있는 가게만 사용합니다.")
     with button_col:
         st.write("")
         if st.button("대화 리셋", use_container_width=True):
@@ -255,27 +289,33 @@ def render_dashboard(csv_path: Path, weekday: str) -> str:
         return ""
 
     open_rows = filter_open_rows(rows, weekday)
+    closed_count = len(rows) - len(open_rows)
+
     st.markdown('<div class="section-title">메뉴 대시보드</div>', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    col1.metric("전체", len(rows))
-    col2.metric("영업중", len(open_rows))
-    col3.metric("휴무", len(rows) - len(open_rows))
+    st.markdown(
+        f"""
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-card-label">전체 가게</div>
+            <div class="stat-card-value">{len(rows)}</div>
+            <div class="stat-card-sub">등록된 가게 수</div>
+          </div>
+          <div class="stat-card open">
+            <div class="stat-card-label">영업중</div>
+            <div class="stat-card-value">{len(open_rows)}</div>
+            <div class="stat-card-sub">오늘 방문 가능</div>
+          </div>
+          <div class="stat-card closed">
+            <div class="stat-card-label">휴무</div>
+            <div class="stat-card-value">{closed_count}</div>
+            <div class="stat-card-sub">오늘 휴무인 가게</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     open_context = build_menu_context_for_day(csv_path, weekday)
-    with st.expander("CSV 미리보기", expanded=False):
-        preview_df = pd.DataFrame(
-            [
-                {
-                    "id": row.id,
-                    "가게": row.name,
-                    "휴무일": row.closed_day,
-                    "주소": row.address,
-                }
-                for row in open_rows
-            ]
-        )
-        st.dataframe(preview_df, use_container_width=True, hide_index=True)
-        st.code(open_context or "영업 중인 가게가 없습니다.", language="text")
 
     st.markdown('<div class="section-title">가게 카드</div>', unsafe_allow_html=True)
     cols = st.columns(2)
@@ -330,14 +370,7 @@ def create_tts_audio(answer: str) -> bytes | None:
     return audio_path.read_bytes()
 
 
-def main() -> None:
-    load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"))
-    st.set_page_config(
-        page_title="점심 메뉴 추천기",
-        page_icon="L",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
+def page_main() -> None:
     inject_styles()
     init_state()
 
@@ -349,7 +382,7 @@ def main() -> None:
               <div class="hero-kicker">LUNCH_RECOMMEND_AGENT</div>
               <div class="hero-title">점심 메뉴 추천기</div>
               <div class="hero-copy">
-                먼저 물어보고 빠르게 고르세요. CSV에 있는 가게만 기준으로 오늘 점심을 추천합니다.
+                먼저 물어보고 빠르게 고르세요.<br/>DB에 있는 가게만 기준으로 오늘 점심을 추천합니다.
               </div>
             </div>
             """,
@@ -371,6 +404,11 @@ def main() -> None:
 
     render_chat_section()
     user_text = st.chat_input("점심 메뉴를 물어보세요")
+
+    # 빠른 질문 버튼 클릭 시 해당 텍스트를 채팅으로 처리
+    if st.session_state.get("quick_question"):
+        user_text = st.session_state.pop("quick_question")
+
     if user_text:
         st.session_state.messages.append({"role": "user", "content": user_text})
         with st.chat_message("user"):
@@ -410,6 +448,28 @@ def main() -> None:
     render_dashboard(csv_path, selected_weekday)
     st.markdown("---")
     render_summary_panel()
+
+
+def main() -> None:
+    load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"))
+    st.set_page_config(
+        page_title="점심 메뉴 추천기",
+        page_icon="L",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    pg = st.navigation(
+        [
+            st.Page(page_main, title="점심 추천", icon="🍱"),
+            st.Page(
+                Path(__file__).resolve().parent / "pages" / "db_page.py",
+                title="데이터베이스",
+                icon="🗃️",
+            ),
+        ]
+    )
+    pg.run()
 
 
 if __name__ == "__main__":
