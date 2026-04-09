@@ -6,6 +6,7 @@ Split modules:
 
 - `stt.py`
 - `llm.py`
+- `menu_db.py`
 - `tts.py`
 - `llm_main.py`
 
@@ -39,3 +40,6 @@ uv run python llm_main.py --text "What should I eat for lunch?"
 TTS is played automatically after the answer is generated.
 
 Characters such as `[`, `]`, `*`, and `/` are removed only for TTS playback.
+
+If you have a CSV menu database, place it at `restaurants.csv` in the project root,
+or pass a custom path with `--menu-csv your_file.csv`.

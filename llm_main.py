@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from llm import generate_response
+from menu_db import DEFAULT_MENU_CSV, load_menu_context
 from stt import record_audio, transcribe_audio
 from tts import play_audio, synthesize_speech
 
@@ -60,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Save TTS audio without playing it.",
     )
+    parser.add_argument(
+        "--menu-csv",
+        default=DEFAULT_MENU_CSV,
+        help="CSV file path for the lunch menu database.",
+    )
     return parser
 
 
@@ -73,6 +79,12 @@ def main() -> int:
         return 1
 
     client = OpenAI(api_key=api_key)
+    menu_csv_path = Path(args.menu_csv)
+    menu_context = load_menu_context(menu_csv_path)
+    if menu_context:
+        print(f"Loaded menu CSV: {menu_csv_path}")
+    else:
+        print(f"Menu CSV not found or empty: {menu_csv_path}")
 
     if args.text:
         user_text = args.text.strip()
@@ -83,7 +95,7 @@ def main() -> int:
         user_text = transcribe_audio(client, wav_path, args.transcribe_model)
         print(f"Transcribed text: {user_text}")
 
-    answer = generate_response(client, user_text, args.model)
+    answer = generate_response(client, user_text, menu_context, args.model)
     print("\nAssistant reply:")
     print(answer)
 
