@@ -378,24 +378,27 @@ def page_main() -> None:
         places = st.session_state["kakao_places"]
         if places:
             st.markdown('<div class="section-title" style="margin-top:1rem">🍴 추천 맛집</div>', unsafe_allow_html=True)
-            place_cols = st.columns(len(places))
-            for col, p in zip(place_cols, places):
-                with col:
-                    st.markdown(
-                        f"""
-                        <div class="restaurant-card">
-                          <div>
-                            <div class="restaurant-name">&#128205; {p['name']}</div>
-                            <div class="restaurant-meta">
-                              {p['address']}<br/>
-                              {'&#128222; ' + p['phone'] if p.get('phone') else '&nbsp;'}
+            cols_per_row = 4
+            for row_start in range(0, len(places), cols_per_row):
+                row_places = places[row_start:row_start + cols_per_row]
+                place_cols = st.columns(len(row_places))
+                for col, p in zip(place_cols, row_places):
+                    with col:
+                        st.markdown(
+                            f"""
+                            <div class="restaurant-card">
+                              <div>
+                                <div class="restaurant-name">&#128205; {p['name']}</div>
+                                <div class="restaurant-meta">
+                                  {p['address']}<br/>
+                                  {'&#128222; ' + p['phone'] if p.get('phone') else '&nbsp;'}
+                                </div>
+                              </div>
+                              <div>{'<a href="' + p['url'] + '" target="_blank" style="font-size:0.82rem;color:#b45309;">카카오맵에서 보기 ↗</a>' if p.get('url') else ''}</div>
                             </div>
-                          </div>
-                          <div>{'<a href="' + p['url'] + '" target="_blank" style="font-size:0.82rem;color:#b45309;">카카오맵에서 보기 ↗</a>' if p.get('url') else ''}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                            """,
+                            unsafe_allow_html=True,
+                        )
         st.divider()
 
     render_chat_section()
@@ -446,10 +449,9 @@ def page_main() -> None:
                         if st.session_state["tts_enabled"]:
                             audio_bytes = create_tts_audio(answer)
                             st.session_state["latest_audio_bytes"] = audio_bytes
-                            if audio_bytes:
-                                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
                         else:
                             st.session_state["latest_audio_bytes"] = None
+                        st.rerun()
 
 
 def main() -> None:
