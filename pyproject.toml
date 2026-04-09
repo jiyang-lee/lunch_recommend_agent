@@ -8,6 +8,7 @@ dependencies = [
   "openai",
   "python-dotenv",
   "gtts",
+  "streamlit",
   "sounddevice",
   "scipy",
 ]

@@ -36,6 +36,7 @@ def generate_response(
     client: OpenAI,
     user_text: str,
     menu_context: str = "",
+    open_only_context: str = "",
     model: str = "gpt-5.4-mini",
 ) -> str:
     db_section = (
@@ -43,7 +44,12 @@ def generate_response(
         "For lunch recommendations, you must rely only on the CSV database entries.\n"
         "If the CSV database is unavailable or insufficient, say so clearly and do not invent options."
     )
-    if menu_context:
+    if open_only_context:
+        db_section += (
+            "\n\nMenu database:\n"
+            f"{open_only_context}"
+        )
+    elif menu_context:
         db_section += (
             "\n\nMenu database:\n"
             "Use the following CSV data as the only allowed source for restaurant recommendations.\n"

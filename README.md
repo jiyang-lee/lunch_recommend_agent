@@ -9,12 +9,13 @@ Split modules:
 - `menu_db.py`
 - `tts.py`
 - `llm_main.py`
+- `streamlit_app.py`
 
 Create the environment and install dependencies with `uv`:
 
 ```bash
 uv venv
-uv add openai python-dotenv gTTS sounddevice scipy
+uv add openai python-dotenv gTTS sounddevice scipy streamlit
 ```
 
 Set your OpenAI key:
@@ -29,6 +30,12 @@ Run with microphone input:
 
 ```bash
 uv run python llm_main.py
+```
+
+Run the Streamlit chat dashboard:
+
+```bash
+uv run streamlit run streamlit_app.py
 ```
 
 Or skip STT and send text directly:
