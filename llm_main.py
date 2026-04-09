@@ -8,10 +8,11 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import APIConnectionError, OpenAI
 
 from llm import generate_response
-from menu_db import DEFAULT_MENU_CSV, load_menu_context
+from location_rag import build_recommendation_context
+from menu_db import DEFAULT_MENU_CSV
 from stt import record_audio, transcribe_audio
 from tts import play_audio, synthesize_speech
 
@@ -20,11 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the lunch recommendation STT -> LLM -> TTS flow."
     )
-    parser.add_argument(
-        "--text",
-        default=None,
-        help="Skip STT and use this text directly.",
-    )
+    parser.add_argument("--text", default=None, help="Skip STT and use this text directly.")
     parser.add_argument(
         "--seconds",
         type=float,
@@ -36,16 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="gpt-4o-mini-transcribe",
         help="OpenAI transcription model name.",
     )
-    parser.add_argument(
-        "--model",
-        default="gpt-5.4-mini",
-        help="OpenAI model name.",
-    )
-    parser.add_argument(
-        "--tts-lang",
-        default="ko",
-        help="gTTS language code.",
-    )
+    parser.add_argument("--model", default="gpt-5.4-mini", help="OpenAI model name.")
+    parser.add_argument("--tts-lang", default="ko", help="gTTS language code.")
     parser.add_argument(
         "--output-audio",
         default="sample1.mp3",
@@ -66,6 +55,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MENU_CSV,
         help="CSV file path for the lunch menu database.",
     )
+    parser.add_argument(
+        "--origin-query",
+        default=None,
+        help="Reference place or address for nearby search.",
+    )
+    parser.add_argument(
+        "--latitude",
+        type=float,
+        default=None,
+        help="Current latitude for nearby search.",
+    )
+    parser.add_argument(
+        "--longitude",
+        type=float,
+        default=None,
+        help="Current longitude for nearby search.",
+    )
+    parser.add_argument(
+        "--radius-m",
+        type=int,
+        default=None,
+        help="Nearby search radius in meters.",
+    )
     return parser
 
 
@@ -79,12 +91,6 @@ def main() -> int:
         return 1
 
     client = OpenAI(api_key=api_key)
-    menu_csv_path = Path(args.menu_csv)
-    menu_context = load_menu_context(menu_csv_path)
-    if menu_context:
-        print(f"Loaded menu CSV: {menu_csv_path}")
-    else:
-        print(f"Menu CSV not found or empty: {menu_csv_path}")
 
     if args.text:
         user_text = args.text.strip()
@@ -95,7 +101,34 @@ def main() -> int:
         user_text = transcribe_audio(client, wav_path, args.transcribe_model)
         print(f"Transcribed text: {user_text}")
 
-    answer = generate_response(client, user_text, menu_context, args.model)
+    recommendation_context = build_recommendation_context(
+        user_text=user_text,
+        csv_path=Path(args.menu_csv),
+        origin_query=args.origin_query,
+        latitude=args.latitude,
+        longitude=args.longitude,
+        radius_m=args.radius_m,
+    )
+    print(f"Recommendation source: {recommendation_context.source_label}")
+    if recommendation_context.note:
+        print(f"Source note: {recommendation_context.note}")
+
+    try:
+        answer = generate_response(
+            client=client,
+            user_text=user_text,
+            menu_context=recommendation_context.context_text,
+            context_source=recommendation_context.source_label,
+            note=recommendation_context.note,
+            model=args.model,
+        )
+    except APIConnectionError:
+        print(
+            "OpenAI connection failed. Check your network, firewall, or proxy settings.",
+            file=sys.stderr,
+        )
+        return 1
+
     print("\nAssistant reply:")
     print(answer)
 
