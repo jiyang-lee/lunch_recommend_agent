@@ -72,4 +72,4 @@ streamlit run streamlit_app.py
 
 ---
 
-필요하시면 제가 `README.md`에 더 추가할 내용(예: 데모 스크린샷, 로컬 개발 팁 등)을 반영해 드릴게요.
+
