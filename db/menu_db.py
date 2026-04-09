@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_MENU_CSV = "restaurants.csv"
+DEFAULT_MENU_CSV = str(Path("db") / "restaurants.csv")
 KOREAN_WEEKDAYS = [
     "월요일",
     "화요일",
