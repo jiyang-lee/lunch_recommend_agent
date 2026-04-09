@@ -1,7 +1,13 @@
 [project]
 name = "lunch-recommend-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local STT -> LLM -> TTS lunch recommendation agent"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+  "openai",
+  "python-dotenv",
+  "gtts",
+  "sounddevice",
+  "scipy",
+]
